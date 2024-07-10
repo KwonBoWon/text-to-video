@@ -1,9 +1,10 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from moviepy.editor import *
 from fastapi.responses import FileResponse
 from PIL import Image
 import numpy as np
 import io
+from rich.markdown import Markdown
 
 app = FastAPI()
 
@@ -40,6 +41,20 @@ async def upload_photo(text: str = Form(...), image: UploadFile = File(...), out
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/markdown")
+async def markdown(request: Request):
+    text = await request.body()
+    decoded_text = text.decode('utf-8')
+    char_count = len(decoded_text)
+    if char_count > 1000:
+        raise HTTPException(status_code=400, detail=f"Text exceeds 1000 characters : {char_count}")
+
+    textLines = decoded_text.split('\n')
+
+    for line in textLines:
+        print(line)
+
+    return {"received_text": decoded_text, "char_count": char_count, "lines": textLines}
 
 @app.post("/photo")
 async def upload_photo(text: str = Form(...), image: UploadFile = File(...), output_filename: str = Form(...)):
