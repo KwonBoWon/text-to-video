@@ -13,16 +13,6 @@ def synthesize_text(text):
     headers = {
         "Content-Type": "application/json"
     }
-    """
-    data = {
-        "input": {"text": text}, # 기본 음성
-        "voice": {
-            "languageCode": "ko-KR",
-            "ssmlGender": "NEUTRAL"
-        },
-        "audioConfig": {"audioEncoding": "MP3"}
-    }
-    """
     data = {
         "input": {"text": text},
         "voice": {
@@ -47,6 +37,7 @@ def synthesize_text(text):
             with open("outputC-1.mp3", "wb") as out:
                 out.write(base64.b64decode(audio_content))
             print('Audio content written to file "output.mp3"')
+            print(f"Audio Length{len(audio_content)}")
         else:
             print("No audio content received")
     else:
