@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from moviepy.editor import *
 from fastapi.responses import FileResponse
-from PIL import Image
+from PIL import Image, ImageOps
 from starlette.background import BackgroundTask
 import numpy as np
 import io
@@ -11,14 +11,29 @@ import requests
 import os
 import json
 import base64
+import logging.config
 from pydantic import BaseModel
 from typing import Optional
 from tempfile import NamedTemporaryFile
+# pip install Pillow==9.5.0
+
+# 로깅 설정 파일 읽기
+with open('logging_config.json', 'r') as json_file:
+    logging_config = json.load(json_file)
+
+# 로깅 설정 적용
+logging.config.dictConfig(logging_config)
 
 app = FastAPI()
 
-font_path = "font/NotoSansKR-Bold.ttf"
+logger = logging.getLogger("myapp")
 
+font_path = "font/NotoSansKR-Regular.ttf"
+bold_font_path = "font/NotoSansKR-ExtraBold.ttf"
+video_size = [1920,1080]
+#video_size = [1080, 1920]
+video_width = video_size[0]
+video_height = video_size[1]
 origins = [
     "*"
 ]
@@ -30,13 +45,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 def download_image(image_url):
     response = requests.get(image_url)
     if response.status_code == 200:
         return Image.open(io.BytesIO(response.content))
     else:
         raise Exception("Image download failed")
-
 
 
 def create_tts(text, model="ko-KR-Wavenet-C", speaking_rate=1.0):
@@ -93,15 +108,50 @@ def create_text_clip(text, font_size, duration, position):
     return composite_clip.set_position(position)
 
 
+def test_create_text_clip(text, font_size, duration, position):
+    print("Text= " + text)
+    parts = re.split(r'(\*\*.*?\*\*)', text)
+    print(parts)
+    clips = []
+    current_x = 0
+    for part in parts:
+        if part == '':
+            continue
+        if part.startswith('**') and part.endswith('**'):
+            # '**'로 감싸진 부분은 굵은 텍스트
+            part = part[2:-2]  # '**' 제거
+            print("BoldText: {}".format(part))
+            clip = TextClip(part, fontsize=font_size, color='white', font=bold_font_path, bg_color='black')
+        else:
+            # 기본 텍스트
+            clip = TextClip(part, fontsize=font_size, color='white', font=font_path, bg_color='black')
+        clip.set_duration(duration).set_position((current_x, position[1]))
+        clips.append(clip)
+        current_x += clip.w
+        print(current_x)
+    composite_clip = CompositeVideoClip(clips)
+    return composite_clip.set_position(position).set_duration(duration)
+
+
 def make_video_clip(title, image, content):
     if content is not None:  # 본문
         audio_clip = create_tts(content)
         clip_duration = audio_clip.duration
-        background_clip = ColorClip(size=(1920, 1080), color=(0, 0, 0), duration=clip_duration)
+        background_clip = ColorClip(size=video_size, color=(0, 0, 0), duration=clip_duration)
         content_clip = create_text_clip(content, font_size=90, duration=clip_duration, position=('center', 'bottom'))
         if image is not None:  # 이미지가 있을 때
             image_pil = download_image(image)
             image_clip = ImageClip(np.array(image_pil)).set_position('center').set_duration(clip_duration)
+            # 이미지 크기가 비디오 크기를 초과할 경우 조정
+            if image_clip.w > video_width or image_clip.h > video_height:
+                # 비율 계산
+                scale_factor = min(video_width / image_clip.w, video_height / image_clip.h)
+                # 새로운 크기 계산
+                new_width = int(image_clip.w * scale_factor)
+                new_height = int(image_clip.h * scale_factor)
+                # 이미지 크기 조정
+                image_clip = image_clip.resize((new_width, new_height))
+
             video = CompositeVideoClip([background_clip, image_clip, content_clip])
             video = video.set_audio(audio_clip)
         elif title is not None:  # 제목이 있을 때
@@ -116,15 +166,25 @@ def make_video_clip(title, image, content):
     elif title is not None:  # 타이틀
         audio_clip_path = create_tts(title)
         clip_duration = audio_clip_path.duration
-        background_clip = ColorClip(size=(1920, 1080), color=(0, 0, 0), duration=clip_duration)
+        background_clip = ColorClip(size=video_size, color=(0, 0, 0), duration=clip_duration)
         title_clip = create_text_clip(title, font_size=100, duration=clip_duration, position=('center', 'bottom'))
         video = CompositeVideoClip([background_clip, title_clip])
         video = video.set_audio(audio_clip_path)
         return video
     elif image is not None:  # 이미지
-        background_clip = ColorClip(size=(1920, 1080), color=(0, 0, 0), duration=3)
+        background_clip = ColorClip(size=video_size, color=(0, 0, 0), duration=3)
         image_pil = download_image(image)
         image_clip = ImageClip(np.array(image_pil)).set_position('center').set_duration(3)
+        # 이미지 크기가 비디오 크기를 초과할 경우 조정
+        if image_clip.w > video_width or image_clip.h > video_height:
+            # 비율 계산
+            scale_factor = min(video_width / image_clip.w, video_height / image_clip.h)
+            # 새로운 크기 계산
+            new_width = int(image_clip.w * scale_factor)
+            new_height = int(image_clip.h * scale_factor)
+            # 이미지 크기 조정
+            image_clip = image_clip.resize((new_width, new_height))
+
         video = CompositeVideoClip([background_clip, image_clip])
         return video
 
@@ -173,21 +233,38 @@ def make_video_clip(title, image, content):
 @app.post("/markdown")
 async def markdown(request: Request):
     try:
-        text = await request.body()
+        data = await request.json()
+
+        text = data.get("text", "")
+        video_size = data.get("video_size", (1920, 1080))
+        tts_type = data.get("tts_type", "ko-KR-Wavenet-C")
+        tts_speed = data.get("tts_speed", 1.0)
+        font_path = data.get("font_path", "font/NotoSansKR-Regular.ttf")
+        bold_font_size = data.get("bold_font_size","font/NotoSansKR-ExtraBold.ttf")
+
+        if not text:
+            raise HTTPException(status_code=404, detail="No text provided")
+
+
         decoded_text = text.decode('utf-8')
+        # body 로깅
+        logger.debug("Decoded text: {}".format(decoded_text))
         char_count = len(decoded_text)
-        if char_count > 2500:
-            raise HTTPException(status_code=400, detail=f"Text exceeds 2500 characters : {char_count}")
+        if char_count > 5000:
+            raise HTTPException(status_code=400, detail=f"Text exceeds 5000 characters : {char_count}")
 
         pre_text_lines = decoded_text.split('\n')
         text_lines = []
         for line in pre_text_lines:
+            # 빈줄 처리
+            if not line.strip():
+                continue
             if line.startswith('!['):
                 text_lines.append(line)
             else:
                 text_clip = TextClip(line, fontsize=90, font=font_path)
                 text_width, _ = text_clip.size
-                if text_width <= 1920:
+                if text_width <= video_size[0]:
                     text_lines.append(line)
                 else:
                     words = line.split(' ')
@@ -195,7 +272,7 @@ async def markdown(request: Request):
                     for word in words[1:]:
                         test_clip = TextClip(wrapped_text + ' ' + word, fontsize=90, font=font_path)
                         test_width, _ = test_clip.size
-                        if test_width <= 1920:
+                        if test_width <= video_size[0]:
                             wrapped_text += ' ' + word
                         else:
                             text_lines.append(wrapped_text)
@@ -228,18 +305,27 @@ async def markdown(request: Request):
         output_filename = "markdownTest"
         # 비디오 파일 경로 설정
         output_filepath = f"video/{output_filename}.mp4"
+        TTS_filepath = f"TTS/"
         # 비디오 파일로 저장
         final_video.write_videofile(output_filepath, fps=24, codec='libx264', audio_codec='aac')
         def cleanup():
             if os.path.exists(output_filepath):
                 os.remove(output_filepath)
+
+            if os.path.exists("TTS/"):
+                for filename in os.listdir("TTS/"):
+                    file_path = os.path.join("TTS/", filename)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+
         # 응답이 완료된 후 파일 삭제
         file_remove = BackgroundTask(cleanup)
-        #response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4", background=file_remove)
-        response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4")
+        response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4", background=file_remove)
+        #response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4")
         return response
 
     except Exception as e:
+        logger.debug("Error: {}".format(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

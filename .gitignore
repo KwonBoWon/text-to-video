@@ -1,9 +1,12 @@
-.venv
+config.txt
+
 *.jpg
 *.png
 *.mp4
 *.mp3
 *.wmv
+
+.venv/
+logs/
 markdown/
-config.txt
 font/
