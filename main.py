@@ -63,6 +63,7 @@ def download_image(image_url):
 
 
 def create_tts(text):
+    text = re.sub(r'^[#]{1,3}', '', text).strip()  # #제거
     model = tts_type
     speaking_rate = tts_speed
     api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
@@ -151,7 +152,7 @@ def make_video_clip(title, image, content):
         content_clip = create_text_clip(content, font_size=90, duration=clip_duration, position=('center', 'bottom'))
         if image is not None:  # 이미지가 있을 때
             image_pil = download_image(image)
-            image_clip = ImageClip(np.array(image_pil)).set_position('center').set_duration(clip_duration)
+            image_clip = ImageClip(np.array(image_pil)).set_position('center').set_duration(3)
             # 이미지 크기가 비디오 크기를 초과할 경우 조정
             if image_clip.w > video_width or image_clip.h > video_height:
                 # 비율 계산
