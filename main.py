@@ -261,11 +261,11 @@ async def markdown(request: Request):
         tts_speed = data.get("tts_speed", 1.0)
         tts_speed = max(0.5, min(1.5, tts_speed))
 
+        if font not in valid_fonts:
+            font = "NotoSansKR"
+            bold_font = "NotoSansKR-Bold"
         font = "font/" + data.get("font", "NotoSansKR") + ".ttf"
         bold_font = "font/" + data.get("font", "NotoSansKR") + "-Bold.ttf"
-        if font not in valid_fonts:
-            font = "NotoSansKR.ttf"
-            bold_font = "NotoSansKR-Bold.ttf"
 
         if not text:
             raise HTTPException(status_code=404, detail="No text provided")
