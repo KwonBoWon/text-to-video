@@ -8,9 +8,18 @@
    * 점
    + 점
 
- - 파라미터추가
-   - 사이즈 1920,1080 or 1080,1920
-   - TTS종류
-   - TTS속도
-   - 폰트
-   - 글씨 색
+ - 파라미터
+   - text
+   - video_size
+     - 1920, 1080(가로)
+     - 1080, 1920(세로)
+   - tts_type
+     - ko-KR-Wavenet-A(명랑한 여자목소리)
+     - ko-KR-Wavenet-B(차분한 여자목소리)
+     - ko-KR-Wavenet-C(차분한 남자목소리)
+     - ko-KR-Wavenet-D(명랑한 남자목소리)
+   - tts_speed
+     - 0.5~1.5
+   - font
+     - NotoSansKR
+     - 서울남산장체

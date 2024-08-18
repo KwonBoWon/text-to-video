@@ -15,6 +15,7 @@ import logging.config
 from pydantic import BaseModel
 from typing import Optional
 from tempfile import NamedTemporaryFile
+
 # pip install Pillow==9.5.0
 
 # 로깅 설정 파일 읽기
@@ -28,12 +29,19 @@ app = FastAPI()
 
 logger = logging.getLogger("myapp")
 
-font_path = "font/NotoSansKR-Regular.ttf"
-bold_font_path = "font/NotoSansKR-ExtraBold.ttf"
-video_size = [1920,1080]
-#video_size = [1080, 1920]
+font = "font/NotoSansKR.ttf"
+bold_font = font + "-Bold"
+
+video_size = [1920, 1080]
 video_width = video_size[0]
 video_height = video_size[1]
+tts_type = "ko-KR-Wavenet-C"
+tts_speed = "1.0"
+
+valid_tts_types = ["ko-KR-Wavenet-A", "ko-KR-Wavenet-B", "ko-KR-Wavenet-C", "ko-KR-Wavenet-D"]
+valid_fonts = ["NotoSansKR", "서울남산장체"]
+
+
 origins = [
     "*"
 ]
@@ -54,7 +62,9 @@ def download_image(image_url):
         raise Exception("Image download failed")
 
 
-def create_tts(text, model="ko-KR-Wavenet-C", speaking_rate=1.0):
+def create_tts(text):
+    model = tts_type
+    speaking_rate = tts_speed
     api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
     if not api_key:
         raise ValueError("API key not found in environment variables")
@@ -97,7 +107,7 @@ def create_tts(text, model="ko-KR-Wavenet-C", speaking_rate=1.0):
 
 
 def create_text_clip(text, font_size, duration, position):
-    text_clip = TextClip(text, fontsize=font_size, color='white', font=font_path)
+    text_clip = TextClip(text, fontsize=font_size, color='white', font=font)
     text_clip = text_clip.set_duration(duration)
     # 텍스트 클립 크기 계산
     text_width, text_height = text_clip.size
@@ -121,10 +131,10 @@ def test_create_text_clip(text, font_size, duration, position):
             # '**'로 감싸진 부분은 굵은 텍스트
             part = part[2:-2]  # '**' 제거
             print("BoldText: {}".format(part))
-            clip = TextClip(part, fontsize=font_size, color='white', font=bold_font_path, bg_color='black')
+            clip = TextClip(part, fontsize=font_size, color='white', font=bold_font, bg_color='black')
         else:
             # 기본 텍스트
-            clip = TextClip(part, fontsize=font_size, color='white', font=font_path, bg_color='black')
+            clip = TextClip(part, fontsize=font_size, color='white', font=font, bg_color='black')
         clip.set_duration(duration).set_position((current_x, position[1]))
         clips.append(clip)
         current_x += clip.w
@@ -228,32 +238,47 @@ def make_video_clip(title, image, content):
         }
     }
 )
-
-
 @app.post("/markdown")
 async def markdown(request: Request):
     try:
         data = await request.json()
 
         text = data.get("text", "")
+        global video_size
+        global font
+        global bold_font
+        global tts_speed
+        global tts_type
+
         video_size = data.get("video_size", (1920, 1080))
+        video_size[0] = max(500, min(video_size[0], 1920))
+        video_size[1] = max(500, min(video_size[1], 1920))
+
         tts_type = data.get("tts_type", "ko-KR-Wavenet-C")
+        if tts_type not in valid_tts_types:
+            tts_type = "ko-KR-Wavenet-C"
+
         tts_speed = data.get("tts_speed", 1.0)
-        font_path = data.get("font_path", "font/NotoSansKR-Regular.ttf")
-        bold_font_size = data.get("bold_font_size","font/NotoSansKR-ExtraBold.ttf")
+        tts_speed = max(0.5, min(1.5, tts_speed))
+
+        font = "font/" + data.get("font", "NotoSansKR") + ".ttf"
+        bold_font = "font/" + data.get("font", "NotoSansKR") + "-Bold.ttf"
+        if font not in valid_fonts:
+            font = "NotoSansKR.ttf"
+            bold_font = "NotoSansKR-Bold.ttf"
 
         if not text:
             raise HTTPException(status_code=404, detail="No text provided")
 
+        # Body 데이터 로깅
+        logger.debug("Received text: {}".format(text))
+        logger.debug("Received param: {}, {}, {}, {}".format(tts_type, tts_speed, font, bold_font))
+        char_count = len(text)
 
-        decoded_text = text.decode('utf-8')
-        # body 로깅
-        logger.debug("Decoded text: {}".format(decoded_text))
-        char_count = len(decoded_text)
         if char_count > 5000:
             raise HTTPException(status_code=400, detail=f"Text exceeds 5000 characters : {char_count}")
 
-        pre_text_lines = decoded_text.split('\n')
+        pre_text_lines = text.split('\n')
         text_lines = []
         for line in pre_text_lines:
             # 빈줄 처리
@@ -262,7 +287,7 @@ async def markdown(request: Request):
             if line.startswith('!['):
                 text_lines.append(line)
             else:
-                text_clip = TextClip(line, fontsize=90, font=font_path)
+                text_clip = TextClip(line, fontsize=90, font=font)
                 text_width, _ = text_clip.size
                 if text_width <= video_size[0]:
                     text_lines.append(line)
@@ -270,7 +295,7 @@ async def markdown(request: Request):
                     words = line.split(' ')
                     wrapped_text = words[0]
                     for word in words[1:]:
-                        test_clip = TextClip(wrapped_text + ' ' + word, fontsize=90, font=font_path)
+                        test_clip = TextClip(wrapped_text + ' ' + word, fontsize=90, font=font)
                         test_width, _ = test_clip.size
                         if test_width <= video_size[0]:
                             wrapped_text += ' ' + word
@@ -296,7 +321,7 @@ async def markdown(request: Request):
             else:  # 본문일때
                 video_clip = make_video_clip(pretitle, preimage, line)
             if video_clips is not None:
-                #print(video_clip.audio.duration)
+                # print(video_clip.audio.duration)
                 video_clips.append(video_clip)
             else:
                 pass
@@ -308,6 +333,7 @@ async def markdown(request: Request):
         TTS_filepath = f"TTS/"
         # 비디오 파일로 저장
         final_video.write_videofile(output_filepath, fps=24, codec='libx264', audio_codec='aac')
+
         def cleanup():
             if os.path.exists(output_filepath):
                 os.remove(output_filepath)
@@ -320,14 +346,17 @@ async def markdown(request: Request):
 
         # 응답이 완료된 후 파일 삭제
         file_remove = BackgroundTask(cleanup)
-        response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4", background=file_remove)
-        #response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4")
+        response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4",
+                                background=file_remove)
+        # response = FileResponse(output_filepath, media_type='video/mp4', filename="markdownTest.mp4")
         return response
 
     except Exception as e:
         logger.debug("Error: {}".format(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
